@@ -1,0 +1,48 @@
+#!/bin/bash
+# Re-bind the I2C-HID touchpad to clear a stuck contact.
+#
+# Resuming from s2idle can leave the touchpad reporting a phantom finger that
+# never lifts, so every gesture is counted one finger too high: one-finger
+# pointer motion registers as a two-finger scroll, two-finger scroll as a
+# three-finger swipe. Unbinding and rebinding the device resets its contact
+# tracking without a reboot.
+#
+# The machine has more than one i2c_hid device (the keyboard is one too), so
+# the touchpad is identified by its input device name rather than assumed.
+
+set -euo pipefail
+
+find_touchpad() {
+  local dev drv input name
+  for dev in /sys/bus/i2c/devices/*; do
+    [[ -e "$dev/driver" ]] || continue
+    drv=$(basename "$(readlink -f "$dev/driver")")
+    [[ $drv == i2c_hid* ]] || continue
+
+    # Look through every input node this device exposes for a touchpad.
+    for input in "$dev"/*/input/input*/name "$dev"/*/*/input/input*/name; do
+      [[ -r $input ]] || continue
+      name=$(< "$input")
+      if [[ ${name,,} == *touchpad* ]]; then
+        printf '%s\t%s' "$(basename "$dev")" "$drv"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+if ! result=$(find_touchpad); then
+  echo "no i2c-hid touchpad found" >&2
+  exit 1
+fi
+
+device=${result%%$'\t'*}
+driver=${result##*$'\t'}
+base="/sys/bus/i2c/drivers/$driver"
+
+printf '%s' "$device" > "$base/unbind"
+sleep 1
+printf '%s' "$device" > "$base/bind"
+
+echo "reset $device via $driver"

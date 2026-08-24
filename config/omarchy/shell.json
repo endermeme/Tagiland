@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "idle": {
+    "screensaver": 150,
+    "lock": 300
+  },
+  "bar": {
+    "position": "top",
+    "transparent": false,
+    "centerAnchor": "",
+    "layout": {
+      "left": [
+        {
+          "id": "omarchy.menu"
+        },
+        {
+          "id": "omarchy.workspaces"
+        }
+      ],
+      "center": [
+        {
+          "id": "omarchy.indicators"
+        },
+        {
+          "id": "sysstats",
+          "type": "command",
+          "exec": "~/.config/omarchy/bar/scripts/sysstats",
+          "interval": 5
+        },
+        {
+          "id": "sysstats-separator",
+          "type": "command",
+          "text": "·"
+        },
+        {
+          "id": "omarchy.clock",
+          "format": "dddd HH:mm",
+          "formatAlt": "d MMMM 'W'ww yyyy",
+          "verticalFormat": "HH\n—\nmm"
+        },
+        {
+          "id": "imstatus",
+          "type": "command",
+          "exec": "~/.config/omarchy/bar/scripts/imstatus",
+          "interval": 2,
+          "onClick": "fcitx5-remote -t"
+        },
+        {
+          "id": "omarchy.keyboard-layout"
+        },
+        {
+          "id": "omarchy.weather"
+        },
+        {
+          "id": "omarchy.system-update"
+        }
+      ],
+      "right": [
+        {
+          "id": "omarchy.tray"
+        },
+        {
+          "id": "omarchy.agents"
+        },
+        {
+          "id": "omarchy.audio"
+        },
+        {
+          "id": "omarchy.bluetooth"
+        },
+        {
+          "id": "binhtagilla.monitor"
+        },
+        {
+          "id": "omarchy.power"
+        },
+        {
+          "id": "omarchy.network"
+        }
+      ]
+    }
+  },
+  "plugins": [
+    {
+      "id": "binhtagilla.battery"
+    }
+  ],
+  "disabledPlugins": [
+    "omarchy.battery"
+  ],
+  "cloneSourceRestores": [
+    "binhtagilla.battery"
+  ]
+}

@@ -1,0 +1,44 @@
+#!/bin/bash
+# fcitx5 input method as an EN / VI badge. Waybar-style JSON, one line.
+
+# The query returns nothing when no window holds an input context, so hold the
+# last known answer rather than blanking on every focus change.
+STATE_FILE="$HOME/.cache/omarchy-imstatus"
+
+# fcitx5 is D-Bus activatable, so any message to org.fcitx.Fcitx5 -- including
+# fcitx5-remote -- spawns a stray instance that steals the bus name from the
+# systemd-managed one. Asking the bus daemon who owns the name never activates.
+owner=$(dbus-send --session --print-reply=literal \
+  --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+  org.freedesktop.DBus.NameHasOwner string:org.fcitx.Fcitx5 2>/dev/null)
+
+im=""
+if [[ $owner == *true* ]]; then
+  im=$(fcitx5-remote -n 2>/dev/null)
+fi
+
+if [[ -n $im ]]; then
+  printf '%s' "$im" > "$STATE_FILE"
+elif [[ -r $STATE_FILE ]]; then
+  read -r im < "$STATE_FILE"
+fi
+
+case $im in
+  bamboo)
+    text="VI"
+    tooltip="Vietnamese (Bamboo) — Ctrl+Shift to switch"
+    class="active"
+    ;;
+  "")
+    text="EN"
+    tooltip="fcitx5 not running"
+    class=""
+    ;;
+  *)
+    text="EN"
+    tooltip="English (${im}) — Ctrl+Shift to switch"
+    class=""
+    ;;
+esac
+
+printf '{"text":"%s","tooltip":"%s","class":"%s"}\n' "$text" "$tooltip" "$class"

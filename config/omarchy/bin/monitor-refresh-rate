@@ -1,0 +1,74 @@
+#!/bin/bash
+# Show or set the refresh rate of the focused monitor.
+#
+#   monitor-refresh-rate            print the current rate (integer Hz)
+#   monitor-refresh-rate --list     print every rate the current resolution offers
+#   monitor-refresh-rate 120        switch to 120 Hz and remember it
+#
+# Resolution, position and scale carry over unchanged. The rate is written into
+# monitors.lua to survive a reboot: Hyprland's "preferred" mode follows EDID,
+# which on this panel means 60 Hz.
+
+set -euo pipefail
+
+MONITOR_LUA="$HOME/.config/hypr/monitors.lua"
+MARK="-- managed by monitor-refresh-rate"
+
+focused() { hyprctl monitors -j | jq -e -c '.[] | select(.focused == true)'; }
+
+current_rate() { focused | jq -r '.refreshRate | round'; }
+
+list_rates() {
+  local info w h
+  info=$(focused)
+  w=$(jq -r '.width' <<< "$info")
+  h=$(jq -r '.height' <<< "$info")
+  hyprctl monitors all -j | jq -r --argjson w "$w" --argjson h "$h" '
+    .[] | select(.focused == true) | .availableModes[]
+    | capture("^(?<w>\\d+)x(?<h>\\d+)@(?<r>[0-9.]+)Hz$")
+    | select((.w | tonumber) == $w and (.h | tonumber) == $h)
+    | .r | tonumber | round
+  ' | sort -n -u
+}
+
+persist() {
+  local name=$1 w=$2 h=$3 rate=$4 bitdepth=$5
+  [[ -f $MONITOR_LUA ]] || return 0
+
+  # Scale stays a reference to omarchy_monitor_scale so that
+  # omarchy-hyprland-monitor-scaling can keep rewriting that one variable.
+  local tmp
+  tmp=$(mktemp)
+  grep -v -- "$MARK" "$MONITOR_LUA" > "$tmp"
+  printf 'hl.monitor({ output = "%s", mode = "%dx%d@%d", position = "auto", scale = omarchy_monitor_scale, bitdepth = %d })  %s\n' \
+    "$name" "$w" "$h" "$rate" "$bitdepth" "$MARK" >> "$tmp"
+  # Write through the path, not over it: monitors.lua may be a symlink into a
+  # dotfiles repo, and mv would silently replace the link with a real file.
+  cat "$tmp" > "$MONITOR_LUA"
+  rm -f "$tmp"
+}
+
+case "${1:-}" in
+  "")       current_rate ;;
+  --list)   list_rates ;;
+  -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *)
+    [[ $1 =~ ^[0-9]+$ ]] || { echo "usage: $(basename "$0") [--list|<rate>]" >&2; exit 1; }
+    rate=$1
+    list_rates | grep -qx "$rate" || { echo "rate ${rate}Hz not available at this resolution" >&2; exit 1; }
+
+    info=$(focused)
+    name=$(jq -r '.name'  <<< "$info")
+    w=$(jq -r '.width'    <<< "$info")
+    h=$(jq -r '.height'   <<< "$info")
+    scale=$(jq -r '.scale' <<< "$info")
+    # Read the depth in use: assuming 8-bit here is an invisible regression.
+    case "$(jq -r '.currentFormat // ""' <<< "$info")" in
+      *2101010*) bitdepth=10 ;;
+      *)         bitdepth=8  ;;
+    esac
+
+    hyprctl keyword monitor "${name},${w}x${h}@${rate},auto,${scale},bitdepth,${bitdepth}" >/dev/null
+    persist "$name" "$w" "$h" "$rate" "$bitdepth"
+    ;;
+esac

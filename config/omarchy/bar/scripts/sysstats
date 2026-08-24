@@ -1,0 +1,127 @@
+#!/bin/bash
+# CPU usage, temp and RAM for the bar; power draw and battery runtime in the
+# tooltip. Forks nothing: /proc and /sys via bash builtins, JSON by printf. The
+# version that shelled out to sensors and jq cost ~70k spawns a day at 5s.
+# Fixed-point integer maths throughout, because bash has no floats.
+
+CACHE_DIR="$HOME/.cache"
+STATE_FILE="$CACHE_DIR/omarchy-sysstats-cpu"
+HWMON_CACHE="$CACHE_DIR/omarchy-sysstats-hwmon"
+
+# Nerd Font glyphs, as raw UTF-8 byte escapes (U+F2DB microchip,
+# U+F2C7 thermometer, U+F233 server, U+F0E7 bolt).
+ICON_CPU=$'\xef\x8b\x9b'
+ICON_TEMP=$'\xef\x8b\x87'
+ICON_RAM=$'\xef\x88\xb3'
+ICON_POWER=$'\xef\x83\xa7'
+
+BAT=/sys/class/power_supply/BAT0
+
+# ---- CPU temperature source ----
+# hwmon numbering is not stable across reboots: resolve by name, cache the path.
+# Sets $hwmon instead of echoing it -- $(...) would fork the one subshell left.
+hwmon=""
+resolve_hwmon() {
+  local cached name dir
+  if [[ -r $HWMON_CACHE ]]; then
+    read -r cached < "$HWMON_CACHE"
+    if [[ -r "$cached/name" ]]; then
+      read -r name < "$cached/name"
+      if [[ $name == k10temp || $name == coretemp ]]; then
+        hwmon=$cached
+        return
+      fi
+    fi
+  fi
+
+  for dir in /sys/class/hwmon/hwmon*; do
+    [[ -r "$dir/name" ]] || continue
+    read -r name < "$dir/name"
+    if [[ $name == k10temp || $name == coretemp ]]; then
+      hwmon=$dir
+      printf '%s' "$dir" > "$HWMON_CACHE"
+      return
+    fi
+  done
+}
+
+# ---- CPU usage (%), delta against the previous tick ----
+read -r _ u n s i w irq sirq _ < /proc/stat
+idle=$((i + w))
+total=$((u + n + s + i + w + irq + sirq))
+
+prev_total=$total
+prev_idle=$idle
+[[ -r $STATE_FILE ]] && read -r prev_total prev_idle < "$STATE_FILE"
+printf '%s %s' "$total" "$idle" > "$STATE_FILE"
+
+d_total=$((total - prev_total))
+d_idle=$((idle - prev_idle))
+cpu_pct=0
+((d_total > 0)) && cpu_pct=$(((100 * (d_total - d_idle)) / d_total))
+
+# ---- RAM usage (%) ----
+mem_total=0
+mem_avail=0
+while read -r key value _; do
+  case $key in
+    MemTotal:) mem_total=$value ;;
+    MemAvailable:) mem_avail=$value; break ;;
+  esac
+done < /proc/meminfo
+mem_pct=0
+((mem_total > 0)) && mem_pct=$(((100 * (mem_total - mem_avail)) / mem_total))
+
+# ---- CPU temperature (millidegrees -> rounded °C) ----
+temp_fmt="—"
+resolve_hwmon
+if [[ -n $hwmon && -r "$hwmon/temp1_input" ]]; then
+  read -r temp_raw < "$hwmon/temp1_input"
+  temp_fmt="$(((temp_raw + 500) / 1000))°C"
+fi
+
+# ---- Power draw (µW -> W, one decimal) ----
+power_fmt="—"
+power_uw=0
+if [[ -r "$BAT/power_now" ]]; then
+  read -r power_uw < "$BAT/power_now"
+  if ((power_uw > 0)); then
+    tenths=$(((power_uw + 50000) / 100000))
+    power_fmt="$((tenths / 10)).$((tenths % 10))W"
+  fi
+fi
+
+# ---- Battery: charge level and runtime ----
+# Tooltip-only: questions you ask on purpose, not numbers you need all day.
+bat_line=""
+time_fmt="—"
+if [[ -r "$BAT/status" && -r "$BAT/energy_now" ]]; then
+  read -r bat_status < "$BAT/status"
+  read -r energy_now < "$BAT/energy_now"
+  read -r capacity < "$BAT/capacity" 2>/dev/null || capacity=""
+
+  runtime=""
+  if ((power_uw > 0)); then
+    if [[ $bat_status == Discharging ]]; then
+      minutes=$((energy_now * 60 / power_uw))
+      time_fmt="$((minutes / 60))h$(printf '%02d' $((minutes % 60)))"
+      runtime=" · ${time_fmt} left"
+    elif [[ $bat_status == Charging && -r "$BAT/energy_full" ]]; then
+      read -r energy_full < "$BAT/energy_full"
+      if ((energy_full > energy_now)); then
+        minutes=$(((energy_full - energy_now) * 60 / power_uw))
+        time_fmt="$((minutes / 60))h$(printf '%02d' $((minutes % 60)))"
+        runtime=" · ${time_fmt} to full"
+      fi
+    fi
+  fi
+  bat_line="\nBattery ${capacity}% (${bat_status,,})${runtime}"
+fi
+
+# ---- Emit one line of Waybar-style JSON (the bar parses only the last line) ----
+mem_used_mb=$(((mem_total - mem_avail) / 1024))
+mem_total_mb=$((mem_total / 1024))
+
+printf '{"text":"%s %s%%  %s %s  %s %s%%","tooltip":"CPU %s%% · %s\\nRAM %s%% (%sMB / %sMB)\\nPower draw: %s%s"}\n' \
+  "$ICON_CPU" "$cpu_pct" "$ICON_TEMP" "$temp_fmt" "$ICON_RAM" "$mem_pct" \
+  "$cpu_pct" "$temp_fmt" "$mem_pct" "$mem_used_mb" "$mem_total_mb" "$power_fmt" "$bat_line"
