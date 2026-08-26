@@ -6,7 +6,7 @@
   },
   "bar": {
     "position": "top",
-    "transparent": false,
+    "transparent": true,
     "centerAnchor": "",
     "layout": {
       "left": [
@@ -58,6 +58,9 @@
       "right": [
         {
           "id": "omarchy.tray"
+        },
+        {
+          "id": "omarchy.tailscale"
         },
         {
           "id": "omarchy.agents"

@@ -19,6 +19,13 @@ All three fingers. Two-finger swipes are not usable here — see the README.
 Modifiers are matched exactly, so holding `Super`+`Shift` will not also trigger
 the plain workspace swipe.
 
+The plain swipe is unclamped. Hyprland defaults resolve the target with the `m`
+prefix, meaning "workspaces already present on this monitor", so a swipe away
+from the lowest open workspace finds no neighbour and dies on the spot. This
+config sets `workspace_swipe_use_r`, which resolves by workspace number
+instead, and `workspace_swipe_forever`, which lets one gesture carry past the
+immediate neighbour. Same reasoning as the arrow bindings below.
+
 ## Windows
 
 | Keys | Result |
